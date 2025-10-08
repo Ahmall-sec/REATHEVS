@@ -97,7 +97,17 @@ def smart_whois(domain: str, server: Optional[str] = None, port: int = DEFAULT_W
         else:
             tld = parts[-1]
             srv = find_whois_server_for_tld(tld, timeout=timeout)
-            server_to_use = srv or ("whois.verisign-grs.com" if tld in ("com", "net") else "whois.iana.org")
+
+            # === Custom fallback untuk domain .id & .sch.id ===
+            if srv:
+                server_to_use = srv
+            else:
+                if tld in ("com", "net"):
+                    server_to_use = "whois.verisign-grs.com"
+                elif tld == "id" or domain.endswith(".sch.id"):
+                    server_to_use = "whois.pandi.or.id"
+                else:
+                    server_to_use = "whois.iana.org"
 
     out["server_used"] = server_to_use
     try:
@@ -138,7 +148,7 @@ def load_batch(file_path: str) -> List[str]:
 
 
 def main():
-    print(BANNER)  # <── Banner ditampilkan di awal
+    print(BANNER)
     args = parse_args()
     domains = args.domains[:]
     if args.batch:
