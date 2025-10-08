@@ -1,12 +1,6 @@
 #!/usr/bin/env python3
 """
 whois_cli.py - simple WHOIS CLI tool
-
-Usage examples:
-  python3 whois_cli.py example.com
-  python3 whois_cli.py -o json example.com
-  python3 whois_cli.py -b domains.txt
-  python3 whois_cli.py -s whois.crsnic.net example.com
 """
 
 import argparse
@@ -14,19 +8,20 @@ import socket
 import sys
 import json
 import re
-from typing import Optional, Tuple, Dict, Any, List
+from typing import Optional, Dict, Any, List
+from colorama import Fore, Style, init
+
+init(autoreset=True)
 
 DEFAULT_WHOIS_PORT = 43
 BUFFER_SIZE = 4096
 DEFAULT_TIMEOUT = 8.0
 
-# Try to use python-whois if installed
 try:
-    import whois as pywhois  # pip install python-whois
+    import whois as pywhois
     HAVE_PYWHOIS = True
 except Exception:
     HAVE_PYWHOIS = False
-
 
 # =======================================================
 # ASCII Banner
@@ -42,9 +37,7 @@ BANNER = r"""
 ====================================================================
 """
 
-
 def whois_query_server(query: str, server: str, port: int = DEFAULT_WHOIS_PORT, timeout: float = DEFAULT_TIMEOUT) -> str:
-    """Query a WHOIS server using raw socket."""
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.settimeout(timeout)
     try:
@@ -60,9 +53,7 @@ def whois_query_server(query: str, server: str, port: int = DEFAULT_WHOIS_PORT, 
     finally:
         s.close()
 
-
 def find_whois_server_for_tld(tld: str, timeout: float = DEFAULT_TIMEOUT) -> Optional[str]:
-    """Ask whois.iana.org for the authoritative whois server for a TLD."""
     try:
         resp = whois_query_server(tld, "whois.iana.org", timeout=timeout)
     except Exception:
@@ -72,9 +63,7 @@ def find_whois_server_for_tld(tld: str, timeout: float = DEFAULT_TIMEOUT) -> Opt
         return m.group(1).strip()
     return None
 
-
 def smart_whois(domain: str, server: Optional[str] = None, port: int = DEFAULT_WHOIS_PORT, timeout: float = DEFAULT_TIMEOUT) -> Dict[str, Any]:
-    """Perform WHOIS lookup with a simple server discovery fallback."""
     domain = domain.strip()
     out: Dict[str, Any] = {"query": domain, "server_used": None, "raw": None, "error": None}
 
@@ -83,22 +72,19 @@ def smart_whois(domain: str, server: Optional[str] = None, port: int = DEFAULT_W
             w = pywhois.whois(domain)
             d = {k: v for k, v in (getattr(w, "__dict__", {}) or {}).items()}
             out["server_used"] = "python-whois"
-            out["raw"] = str(d)
             out["parsed"] = d
             return out
         except Exception as e:
             out["error"] = f"python-whois failed: {e}"
 
     server_to_use = server
-    if server_to_use is None:
+    if not server_to_use:
         parts = domain.lower().split(".")
         if len(parts) < 2:
             server_to_use = "whois.iana.org"
         else:
             tld = parts[-1]
             srv = find_whois_server_for_tld(tld, timeout=timeout)
-
-            # === Custom fallback untuk domain .id & .sch.id ===
             if srv:
                 server_to_use = srv
             else:
@@ -128,7 +114,6 @@ def smart_whois(domain: str, server: Optional[str] = None, port: int = DEFAULT_W
         out["error"] = str(exc)
         return out
 
-
 def parse_args():
     p = argparse.ArgumentParser(description="Simple WHOIS CLI tool")
     p.add_argument("domains", nargs="*", help="Domain(s) to query e.g. example.com")
@@ -141,56 +126,60 @@ def parse_args():
     p.add_argument("--no-referral", action="store_true", help="Disable referral follow")
     return p.parse_args()
 
-
 def load_batch(file_path: str) -> List[str]:
     with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
         return [ln.strip() for ln in f if ln.strip() and not ln.startswith("#")]
 
+def print_clean(raw: str):
+    """Cetak hasil WHOIS bersih dan rapi"""
+    if not raw:
+        print(Fore.RED + "No WHOIS data.")
+        return
+    clean_raw = re.sub(r'[\r]+', '', raw)
+    clean_raw = re.sub(r'\n\s*\n+', '\n', clean_raw.strip())
+    for line in clean_raw.split("\n"):
+        print("  " + Fore.WHITE + line.strip())
 
 def main():
-    print(BANNER)
+    print(Fore.CYAN + BANNER)
     args = parse_args()
     domains = args.domains[:]
     if args.batch:
         try:
             domains += load_batch(args.batch)
         except Exception as e:
-            print(f"Failed to read batch file: {e}", file=sys.stderr)
+            print(Fore.RED + f"Failed to read batch file: {e}", file=sys.stderr)
             sys.exit(2)
     if not domains:
-        print("No domains specified. Use --help for usage.", file=sys.stderr)
+        print(Fore.YELLOW + "No domains specified. Use --help for usage.", file=sys.stderr)
         sys.exit(1)
 
     results = []
     for d in domains:
-        if args.quiet and args.output == "text":
-            res = smart_whois(d, server=args.server, port=args.port, timeout=args.timeout)
-            print(res.get("raw", ""))
-            continue
         res = smart_whois(d, server=args.server, port=args.port, timeout=args.timeout)
-        if args.no_referral:
-            res.pop("raw_follow", None)
-            res.pop("server_used_follow", None)
         results.append(res)
         if args.output == "text":
-            print("=" * 70)
-            print(f"Domain: {d}")
-            print(f"Server used: {res.get('server_used')}")
+            print(Fore.GREEN + "=" * 70)
+            print(Fore.YELLOW + f"Domain: {d}")
+            print(Fore.CYAN + f"Server used: {res.get('server_used')}")
             if res.get("server_used_follow"):
-                print(f"Referral server used: {res.get('server_used_follow')}")
+                print(Fore.CYAN + f"Referral server used: {res.get('server_used_follow')}")
             if res.get("error"):
-                print("ERROR:", res["error"])
-            if res.get("raw"):
-                print("\n--- RAW WHOIS ---\n")
-                print(res["raw"])
+                print(Fore.RED + "ERROR:", res["error"])
+            elif res.get("parsed"):
+                print(Fore.MAGENTA + "\n--- WHOIS INFO (parsed) ---\n")
+                for k, v in res["parsed"].items():
+                    print(f"  {Fore.GREEN}{k:<20}{Style.RESET_ALL}: {v}")
+            elif res.get("raw"):
+                print(Fore.MAGENTA + "\n--- WHOIS INFO ---\n")
+                print_clean(res["raw"])
             if res.get("raw_follow"):
-                print("\n--- RAW WHOIS (follow referral) ---\n")
-                print(res["raw_follow"])
-            print("=" * 70 + "\n")
+                print(Fore.BLUE + "\n--- WHOIS (Referral) ---\n")
+                print_clean(res["raw_follow"])
+            print(Fore.GREEN + "=" * 70 + "\n")
 
     if args.output == "json":
         print(json.dumps(results, indent=2, ensure_ascii=False))
-
 
 if __name__ == "__main__":
     main()
